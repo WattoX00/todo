@@ -76,6 +76,24 @@ describe('GitHub Contents API errors', () => {
     await expect(new GitHubClient(credentials, fetcher).listFiles()).rejects.toMatchObject({ status: 0 });
   });
 
+  it('retries repository validation once after a network failure', async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('offline'))
+      .mockResolvedValueOnce(response(200, { default_branch: 'main', permissions: { push: true } }));
+
+    await expect(new GitHubClient(credentials, fetcher).validate()).resolves.toMatchObject({
+      default_branch: 'main',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports a persistent connection failure without leaking request details', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockRejectedValue(new TypeError('offline'));
+    await expect(new GitHubClient(credentials, fetcher).validate())
+      .rejects.toThrow('Could not reach GitHub.');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
   it('uses a cached ETag and content for conditional file refreshes', async () => {
     const content = encodeBase64Utf8('# Cached\n\n- [ ] keep');
     const fetcher = vi.fn<typeof fetch>()

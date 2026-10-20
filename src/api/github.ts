@@ -60,7 +60,15 @@ export class GitHubClient {
   constructor(readonly credentials: Credentials, private readonly fetcher: typeof fetch = fetch) {}
 
   async validate(): Promise<RepoInfo> {
-    const repo = await this.request<RepoInfo>(`/repos/${this.credentials.owner}/${this.credentials.repo}`);
+    const path = `/repos/${this.credentials.owner}/${this.credentials.repo}`;
+    let repo: RepoInfo;
+    try {
+      repo = await this.request<RepoInfo>(path);
+    } catch (error) {
+      if (!(error instanceof GitHubError) || error.status !== 0) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      repo = await this.request<RepoInfo>(path);
+    }
     if (!repo.permissions?.push) throw new GitHubError('This token does not have write access to the repository.', 403);
     return repo;
   }
@@ -150,7 +158,7 @@ export class GitHubClient {
     try {
       response = await this.fetcher(this.url(path), { headers: this.headers() });
     } catch {
-      throw new GitHubError('Network unavailable. Check your connection and try again.', 0);
+      throw new GitHubError('Could not reach GitHub. Check your connection, VPN, firewall, or browser extensions, then try again.', 0);
     }
     if (!response.ok) throw await this.errorFrom(response);
     return await response.json() as T;

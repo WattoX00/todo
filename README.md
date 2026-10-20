@@ -30,6 +30,8 @@ The production HTML includes a restrictive Content Security Policy. UI text is i
 
 Vite's relative `base: './'` and hash routing support Pages URLs under a repository sub-path, such as `https://your-name.github.io/private-todos/`. Do not place the PAT in source, Pages settings, an Actions secret, or a URL.
 
+If connecting reports that GitHub could not be reached, the app retries the repository check once. A persistent error may indicate a connection, VPN, firewall, or browser-extension restriction; check the browser's Network panel for the `api.github.com` request. Never share request headers or a copied cURL command, since they can contain the PAT.
+
 ## Data format
 
 Each list is stored at `lists/<slug>-<short-random-suffix>.txt`.
