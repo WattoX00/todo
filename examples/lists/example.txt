@@ -1,6 +1,0 @@
-# Example list
-
-* [ ] Pinned item
-- [ ] Open item
-- [x] Completed item
-Keep unknown note lines exactly as written.
