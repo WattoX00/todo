@@ -9,8 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./styles.css">
-    <script src="./app.js" defer></script>
+    <link rel="stylesheet" href="./styles.css?v=4">
+    <script src="./app.js?v=4" defer></script>
   </head>
   <body>
     <main id="app">
@@ -82,17 +82,26 @@
             </section>
             <section class="tasks-view hidden" id="tasks-view">
               <div class="task-heading">
-                <div class="task-heading-top"><button class="back-link" id="back-to-lists" type="button">← <span>All lists</span></button><div class="list-actions"><button class="icon-button" id="share-list-button" type="button" aria-label="Share list" title="Share list">↗</button><button class="icon-button" id="rename-list-button" type="button" aria-label="Rename list" title="Rename list">···</button></div></div>
+                <div class="task-heading-top"><button class="back-link" id="back-to-lists" type="button">← <span>All lists</span></button><div class="list-actions"><button class="icon-button" id="share-list-button" type="button" aria-label="Share list as text" title="Share list as text">↗</button><button class="icon-button" id="rename-list-button" type="button" aria-label="Rename list" title="Rename list">···</button></div></div>
                 <div class="eyebrow"><span class="heading-spark">✳</span> YOUR FOCUS, RIGHT HERE</div>
                 <h1 id="task-list-title">A list worth making</h1>
                 <p class="task-subtitle"><span id="task-progress">0 of 0 done</span><span class="progress-separator">·</span><span>Made with intention.</span></p>
                 <div class="progress-track"><span id="progress-fill"></span></div>
               </div>
-              <div class="task-editor">
-                <div class="task-list" id="task-list" role="listbox" aria-label="Tasks"></div>
-                <form id="add-task-form" class="add-task-form"><span class="add-task-plus" aria-hidden="true">＋</span><input id="new-task-input" type="text" placeholder="Add a task — something small counts." autocomplete="off" aria-label="New task"><kbd>↵</kbd></form>
-                <div class="editor-footer"><span><kbd>j</kbd><kbd>k</kbd> to move <span class="footer-divider">·</span> <kbd>↵</kbd> edit <span class="footer-divider">·</span> <kbd>?</kbd> for all shortcuts</span><span id="task-count-footer">0 tasks</span></div>
+              <div class="mode-switch" role="group" aria-label="List mode">
+                <button class="mode-button active" id="view-mode-button" type="button"><span aria-hidden="true">◉</span> View <kbd>v</kbd></button>
+                <button class="mode-button" id="edit-mode-button" type="button"><span aria-hidden="true">⌘</span> Write <kbd>e</kbd></button>
               </div>
+              <section class="task-view" id="task-view" aria-label="Todo list view"></section>
+              <section class="task-editor hidden" id="task-editor" aria-label="Todo list editor">
+                <div class="terminal-titlebar"><span class="terminal-lights" aria-hidden="true"><i></i><i></i><i></i></span><span class="terminal-path">daymark <span>/</span> <span id="terminal-list-title">todo.md</span></span><span class="terminal-mode" id="terminal-mode">NORMAL</span></div>
+                <div class="terminal-body">
+                  <div class="terminal-line"><span class="line-number">01</span><span class="terminal-comment">" One thing at a time. You’ve got this.</span></div>
+                  <div class="task-list" id="task-list" role="listbox" aria-label="Tasks" tabindex="0"></div>
+                  <form id="add-task-form" class="add-task-form"><span class="line-number">+</span><span class="add-task-plus" aria-hidden="true">›</span><input id="new-task-input" type="text" placeholder="Add a task..." autocomplete="off" aria-label="New task"><kbd>↵</kbd></form>
+                </div>
+                <div class="editor-footer"><span><kbd>j</kbd><kbd>k</kbd> move <span class="footer-divider">·</span> <kbd>e</kbd> edit <span class="footer-divider">·</span> <kbd>Alt</kbd>+<kbd>j</kbd><kbd>k</kbd> reorder <span class="footer-divider">·</span> <kbd>?</kbd> help</span><span id="task-count-footer">0 tasks</span></div>
+              </section>
             </section>
           </div>
           <footer class="workspace-footer"><span>Small steps. Good things.</span><span>YOUR DATA STAYS YOURS <span class="footer-star">✳</span></span></footer>

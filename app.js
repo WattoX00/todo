@@ -18,6 +18,8 @@ const ui = {
   emptyLists: $("#empty-lists"),
   listsView: $("#lists-view"),
   tasksView: $("#tasks-view"),
+  taskView: $("#task-view"),
+  taskEditor: $("#task-editor"),
   taskList: $("#task-list"),
   newTask: $("#new-task-input"),
   modalBackdrop: $("#modal-backdrop"),
@@ -39,7 +41,8 @@ const state = {
   toastTimer: null,
   writeQueue: Promise.resolve(),
   editingTaskId: null,
-  searchQuery: ""
+  searchQuery: "",
+  mode: "view"
 };
 
 function repoParts(repo) {
@@ -98,6 +101,12 @@ async function loadData() {
     if (Array.isArray(file) || !file.content || !file.sha) throw new Error("The Daymark data file is not a valid JSON file.");
     const data = decodeContent(file.content);
     if (!data || !Array.isArray(data.lists)) throw new Error("The Daymark data file has an unsupported format.");
+    for (const list of data.lists) {
+      if (!Array.isArray(list.tasks)) throw new Error("A todo list in the Daymark data file has an unsupported format.");
+      for (const task of list.tasks) {
+        if (typeof task.description !== "string") task.description = "";
+      }
+    }
     state.data = data;
     state.sha = file.sha;
   } catch (error) {
@@ -165,9 +174,6 @@ async function connect(token, repo, remember) {
     localStorage.removeItem(REPO_KEY);
   }
   setConnectedScreen();
-  const sharedList = new URLSearchParams(location.search).get("list");
-  const sharedRepo = new URLSearchParams(location.search).get("repo");
-  if (sharedList && (!sharedRepo || sharedRepo.toLowerCase() === state.repo.toLowerCase()) && findList(sharedList)) openList(sharedList);
 }
 
 function findList(id) {
@@ -244,6 +250,7 @@ function openList(id) {
   state.activeListId = id;
   state.selectedTask = 0;
   state.searchQuery = "";
+  state.mode = "view";
   ui.listsView.classList.add("hidden");
   ui.tasksView.classList.remove("hidden");
   $("#top-list-label").textContent = currentList().title;
@@ -254,6 +261,7 @@ function openList(id) {
 function showAllLists() {
   state.activeListId = null;
   state.editingTaskId = null;
+  state.mode = "view";
   ui.tasksView.classList.add("hidden");
   ui.listsView.classList.remove("hidden");
   $("#top-list-label").textContent = "All lists";
@@ -263,12 +271,25 @@ function showAllLists() {
 function renderTasks() {
   const list = currentList();
   if (!list) return;
+  state.selectedTask = Math.max(0, Math.min(state.selectedTask, list.tasks.length - 1));
   $("#task-list-title").textContent = list.title;
+  $("#terminal-list-title").textContent = `${list.title}.md`;
   $("#top-list-label").textContent = list.title;
   const done = list.tasks.filter((task) => task.completed).length;
   $("#task-progress").textContent = `${done} of ${list.tasks.length} done`;
   $("#progress-fill").style.width = `${list.tasks.length ? (done / list.tasks.length) * 100 : 0}%`;
   $("#task-count-footer").textContent = `${list.tasks.length} ${list.tasks.length === 1 ? "task" : "tasks"}`;
+  ui.taskView.classList.toggle("hidden", state.mode !== "view");
+  ui.taskEditor.classList.toggle("hidden", state.mode !== "write");
+  $("#view-mode-button").classList.toggle("active", state.mode === "view");
+  $("#edit-mode-button").classList.toggle("active", state.mode === "write");
+  $("#view-mode-button").setAttribute("aria-pressed", String(state.mode === "view"));
+  $("#edit-mode-button").setAttribute("aria-pressed", String(state.mode === "write"));
+  renderTaskView(list);
+  if (state.mode !== "write") {
+    updateTerminalMode();
+    return;
+  }
   ui.taskList.replaceChildren();
   if (list.tasks.length === 0) {
     const empty = document.createElement("div");
@@ -279,20 +300,69 @@ function renderTasks() {
   list.tasks.forEach((task, index) => {
     const row = document.createElement("div");
     row.className = `task-row${index === state.selectedTask ? " selected" : ""}${task.completed ? " completed" : ""}`;
+    row.tabIndex = -1;
     row.setAttribute("role", "option");
     row.setAttribute("aria-selected", index === state.selectedTask ? "true" : "false");
-    row.innerHTML = `<span class="task-check">${task.completed ? "✓" : ""}</span><span class="task-text"></span><span class="task-row-hint">↵ edit</span>`;
+    row.innerHTML = `<span class="line-number">${String(index + 2).padStart(2, "0")}</span><span class="task-check">${task.completed ? "✓" : ""}</span><span class="task-copy"><span class="task-text"></span><span class="task-description"></span></span><span class="task-row-hint"></span><span class="task-row-actions"><button class="task-action task-edit-button" type="button" aria-label="Edit task" title="Edit task">✎</button><button class="task-action task-up-button" type="button" aria-label="Move task up" title="Move task up">↑</button><button class="task-action task-down-button" type="button" aria-label="Move task down" title="Move task down">↓</button></span>`;
     row.querySelector(".task-text").textContent = task.text;
+    row.querySelector(".task-description").textContent = task.description || "";
+    row.querySelector(".task-description").classList.toggle("hidden", !task.description);
+    row.querySelector(".task-edit-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      editTask(task);
+    });
+    row.querySelector(".task-up-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      moveTask(index, -1);
+    });
+    row.querySelector(".task-down-button").addEventListener("click", (event) => {
+      event.stopPropagation();
+      moveTask(index, 1);
+    });
     row.addEventListener("click", () => {
       state.selectedTask = index;
       renderTasks();
+      ui.taskList.focus();
     });
-    row.addEventListener("dblclick", () => editTask(task));
     ui.taskList.append(row);
     if (state.editingTaskId === task.id) beginInlineEdit(row, task);
   });
   const selected = ui.taskList.children[state.selectedTask];
   if (selected && !state.editingTaskId) selected.scrollIntoView({ block: "nearest" });
+  updateTerminalMode();
+}
+
+function renderTaskView(list) {
+  const heading = document.createElement("div");
+  heading.className = "view-list-heading";
+  heading.innerHTML = `<span class="view-list-kicker">THE LIST</span><span class="view-list-count"></span>`;
+  heading.querySelector(".view-list-count").textContent = `${list.tasks.length} ${list.tasks.length === 1 ? "item" : "items"}`;
+  const rows = document.createElement("div");
+  rows.className = "view-task-list";
+  for (const task of list.tasks) {
+    const row = document.createElement("article");
+    row.className = `view-task-row${task.completed ? " completed" : ""}`;
+    row.innerHTML = `<button class="view-task-check" type="button" aria-label="${task.completed ? "Mark incomplete" : "Mark complete"}"></button><div class="view-task-copy"><span class="view-task-title"></span><span class="view-task-description"></span></div>`;
+    row.querySelector(".view-task-check").textContent = task.completed ? "✓" : "";
+    row.querySelector(".view-task-title").textContent = task.text;
+    const description = row.querySelector(".view-task-description");
+    description.textContent = task.description || "";
+    description.classList.toggle("hidden", !task.description);
+    row.querySelector(".view-task-check").addEventListener("click", () => toggleTask(task.id));
+    rows.append(row);
+  }
+  ui.taskView.replaceChildren(heading, rows);
+  if (list.tasks.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "view-empty";
+    empty.textContent = "Nothing on the list yet. Switch to Write when you’re ready to add something.";
+    rows.append(empty);
+  }
+}
+
+function updateTerminalMode() {
+  const terminalMode = $("#terminal-mode");
+  if (terminalMode) terminalMode.textContent = state.editingTaskId || document.activeElement === ui.newTask ? "INSERT" : "NORMAL";
 }
 
 function beginInlineEdit(row, task) {
@@ -307,11 +377,16 @@ function beginInlineEdit(row, task) {
     event.stopPropagation();
     if (event.key === "Enter") {
       event.preventDefault();
-      saveTaskEdit(task.id, input.value);
+      saveTaskEdit(task.id, input.value, true);
     } else if (event.key === "Escape") {
       event.preventDefault();
-      state.editingTaskId = null;
-      renderTasks();
+      if (task.draft && input.value.trim()) saveTaskEdit(task.id, input.value, true);
+      else {
+        if (task.draft) currentList().tasks = currentList().tasks.filter((item) => item.id !== task.id);
+        state.editingTaskId = null;
+        renderTasks();
+        ui.taskList.focus();
+      }
     }
   });
   input.addEventListener("blur", () => {
@@ -319,23 +394,29 @@ function beginInlineEdit(row, task) {
   });
   input.focus();
   input.select();
+  updateTerminalMode();
 }
 
-function saveTaskEdit(id, value) {
+function saveTaskEdit(id, value, returnFocus = false) {
   const task = currentList()?.tasks.find((item) => item.id === id);
   state.editingTaskId = null;
   if (task && value.trim()) {
     task.text = value.trim();
+    delete task.draft;
     persistData("Edit task");
+  } else if (task?.draft) {
+    currentList().tasks = currentList().tasks.filter((item) => item.id !== id);
   }
   renderTasks();
+  updateTerminalMode();
+  if (returnFocus) ui.taskList.focus();
 }
 
 function addTask(text, index = null) {
   const list = currentList();
   const cleanText = text.trim();
   if (!list || !cleanText) return;
-  const task = { id: crypto.randomUUID(), text: cleanText, completed: false };
+  const task = { id: crypto.randomUUID(), text: cleanText, description: "", completed: false };
   if (index === null) list.tasks.push(task);
   else list.tasks.splice(index, 0, task);
   state.selectedTask = list.tasks.indexOf(task);
@@ -345,17 +426,70 @@ function addTask(text, index = null) {
 
 function editTask(task = currentList()?.tasks[state.selectedTask]) {
   if (!task) return;
-  state.editingTaskId = task.id;
-  state.selectedTask = currentList().tasks.indexOf(task);
+  openTaskEditor(task);
+}
+
+function openTaskEditor(task) {
+  ui.modal.innerHTML = `<div class="modal-header"><h2 id="modal-title">Edit task</h2><button class="icon-button modal-close" type="button" aria-label="Close dialog">×</button></div><p class="modal-copy">Give this task a clear next step and any helpful context.</p><form><label for="task-title-input">Task</label><input id="task-title-input" type="text" maxlength="160" autocomplete="off" required><label for="task-description-input">Description <span class="label-note">optional</span></label><textarea id="task-description-input" rows="4" maxlength="1000" placeholder="Add a few details..."></textarea><p class="modal-error hidden" role="alert"></p><div class="modal-actions"><button class="button button-secondary modal-cancel" type="button">Cancel</button><button class="button button-primary" type="submit">Save task</button></div></form>`;
+  const title = $("#task-title-input");
+  const description = $("#task-description-input");
+  title.value = task.text;
+  description.value = task.description || "";
+  ui.modalBackdrop.classList.remove("hidden");
+  $(".modal-close").addEventListener("click", closeModal);
+  $(".modal-cancel").addEventListener("click", closeModal);
+  ui.modalBackdrop.addEventListener("click", modalBackdropClick);
+  ui.modal.querySelector("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const nextTitle = title.value.trim();
+    if (!nextTitle) {
+      title.focus();
+      return;
+    }
+    const previous = { text: task.text, description: task.description || "", draft: task.draft };
+    task.text = nextTitle;
+    task.description = description.value.trim();
+    delete task.draft;
+    if (!await persistData("Edit task")) {
+      Object.assign(task, previous);
+      renderTasks();
+      return;
+    }
+    renderTasks();
+    closeModal();
+  });
+  title.focus();
+  title.select();
+}
+
+function setMode(mode) {
+  if (mode !== "view" && mode !== "write") return;
+  if (state.mode === "write" && state.editingTaskId) {
+    const input = $(".task-edit-input");
+    if (input) saveTaskEdit(state.editingTaskId, input.value);
+  }
+  state.mode = mode;
+  state.pendingKey = "";
   renderTasks();
 }
 
-function toggleTask() {
-  const task = currentList()?.tasks[state.selectedTask];
+function toggleTask(taskId = currentList()?.tasks[state.selectedTask]?.id) {
+  const task = currentList()?.tasks.find((item) => item.id === taskId);
   if (!task) return;
   task.completed = !task.completed;
+  state.selectedTask = currentList().tasks.indexOf(task);
   persistData(task.completed ? "Complete task" : "Reopen task");
   render();
+}
+
+function moveTask(index, direction) {
+  const list = currentList();
+  const destination = index + direction;
+  if (!list || destination < 0 || destination >= list.tasks.length) return;
+  [list.tasks[index], list.tasks[destination]] = [list.tasks[destination], list.tasks[index]];
+  state.selectedTask = destination;
+  persistData("Reorder tasks");
+  renderTasks();
 }
 
 function deleteSelectedTask() {
@@ -480,30 +614,42 @@ function renameList() {
 async function shareList() {
   const list = currentList();
   if (!list) return;
-  const url = new URL(location.href);
-  url.search = "";
-  url.searchParams.set("repo", state.repo);
-  url.searchParams.set("list", list.id);
+  const text = [
+    list.title,
+    ...list.tasks.map((task) => `${task.completed ? "[x]" : "[ ]"} ${task.text}${task.description ? `\n    ${task.description.replace(/\n/g, "\n    ")}` : ""}`)
+  ].join("\n");
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: list.title, text });
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      await copyShareText(text);
+    }
+    return;
+  }
+  await copyShareText(text);
+}
+
+async function copyShareText(text) {
   try {
-    await navigator.clipboard.writeText(url.toString());
-    showToast("List link copied. Recipients need access to this repo and their own token.");
+    if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+    await navigator.clipboard.writeText(text);
+    showToast("Todo list copied as text.");
   } catch {
-    openModal({
-      title: "Share this list",
-      description: "Recipients need access to this GitHub repository and their own token to open this list.",
-      label: "Share link",
-      value: url.toString(),
-      submitText: "Done",
-      onSubmit: async () => true
-    });
-    $("#modal-input").readOnly = true;
-    $("#modal-input").addEventListener("focus", (event) => event.target.select());
+    ui.modal.innerHTML = `<div class="modal-header"><h2 id="modal-title">Share as text</h2><button class="icon-button modal-close" type="button" aria-label="Close dialog">×</button></div><p class="modal-copy">Copy this plain-text version of your list.</p><textarea class="share-text" aria-label="Todo list text" readonly></textarea><div class="modal-actions"><button class="button button-secondary modal-cancel" type="button">Close</button></div>`;
+    $(".share-text").value = text;
+    ui.modalBackdrop.classList.remove("hidden");
+    $(".modal-close").addEventListener("click", closeModal);
+    $(".modal-cancel").addEventListener("click", closeModal);
+    ui.modalBackdrop.addEventListener("click", modalBackdropClick);
+    $(".share-text").focus();
+    $(".share-text").select();
   }
 }
 
 function showHelp() {
   ui.modal.innerHTML = `<div class="modal-header"><h2 id="modal-title">Your keyboard, your flow.</h2><button class="icon-button modal-close" type="button" aria-label="Close dialog">×</button></div><p class="modal-copy">Vim-inspired shortcuts for moving through your list. Press <kbd>Esc</kbd> or <kbd>?</kbd> to close.</p><div class="help-list">${[
-    ["j / ↓", "Move down"], ["k / ↑", "Move up"], ["gg", "Jump to the first task"], ["G", "Jump to the last task"], ["Enter", "Edit the selected task"], ["o", "Add a task below and edit it"], ["a", "Add a task at the end"], ["x", "Mark done / reopen"], ["dd", "Delete the selected task"], ["/", "Search tasks"], ["q", "Back to all lists"], ["?", "Show this help"]
+    ["v / e", "Switch between View and Write modes"], ["j / ↓", "Move down"], ["k / ↑", "Move up"], ["gg", "Jump to the first task"], ["G", "Jump to the last task"], ["Enter / i", "Edit task title and description"], ["o", "Insert a task below and type its title"], ["a", "Focus the add-task field"], ["x", "Mark done / reopen"], ["Alt+j / Alt+k", "Move the selected task down / up"], ["dd", "Delete the selected task"], ["/", "Search tasks"], ["q", "Back to all lists"], ["Esc", "Save or cancel typing; close a dialog"], ["?", "Show this help"]
   ].map(([key, description]) => `<div class="help-row"><kbd>${key}</kbd><span>${description}</span></div>`).join("")}</div><div class="modal-actions"><button class="button button-primary modal-close-action" type="button">Got it</button></div>`;
   ui.modalBackdrop.classList.remove("hidden");
   $(".modal-close").addEventListener("click", closeModal);
@@ -531,9 +677,9 @@ function searchTasks() {
 
 function handleEditorKeys(event) {
   if (!state.activeListId || !ui.modalBackdrop.classList.contains("hidden")) return;
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
   const list = currentList();
   if (!list) return;
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
   if (event.key === "?") {
     event.preventDefault();
     showHelp();
@@ -546,6 +692,27 @@ function handleEditorKeys(event) {
   }
   if (event.key === "q") {
     showAllLists();
+    return;
+  }
+  if (event.key.toLowerCase() === "v") {
+    event.preventDefault();
+    setMode("view");
+    return;
+  }
+  if (event.key.toLowerCase() === "e") {
+    event.preventDefault();
+    setMode("write");
+    return;
+  }
+  if (state.mode !== "write") return;
+  if (event.altKey && (event.key === "j" || event.key === "ArrowDown")) {
+    event.preventDefault();
+    moveTask(state.selectedTask, 1);
+    return;
+  }
+  if (event.altKey && (event.key === "k" || event.key === "ArrowUp")) {
+    event.preventDefault();
+    moveTask(state.selectedTask, -1);
     return;
   }
   if (event.key === "j" || event.key === "ArrowDown") {
@@ -590,12 +757,19 @@ function handleEditorKeys(event) {
   if (event.key === "Enter") {
     event.preventDefault();
     editTask();
+  } else if (event.key === "i") {
+    event.preventDefault();
+    editTask();
   } else if (event.key === "x") {
     toggleTask();
   } else if (event.key === "o") {
     event.preventDefault();
-    addTask("New task", state.selectedTask + 1);
-    editTask();
+    const draft = { id: crypto.randomUUID(), text: "", description: "", completed: false, draft: true };
+    const insertAt = list.tasks.length ? Math.min(state.selectedTask + 1, list.tasks.length) : 0;
+    list.tasks.splice(insertAt, 0, draft);
+    state.selectedTask = insertAt;
+    state.editingTaskId = draft.id;
+    renderTasks();
   } else if (event.key === "a") {
     ui.newTask.focus();
   } else if (event.key === "/") {
@@ -638,11 +812,30 @@ $("#back-to-lists").addEventListener("click", showAllLists);
 $("#share-list-button").addEventListener("click", shareList);
 $("#rename-list-button").addEventListener("click", renameList);
 $("#help-button").addEventListener("click", showHelp);
+$("#view-mode-button").addEventListener("click", () => setMode("view"));
+$("#edit-mode-button").addEventListener("click", () => setMode("write"));
 $("#add-task-form").addEventListener("submit", (event) => {
   event.preventDefault();
   if (!ui.newTask.value.trim()) return;
   addTask(ui.newTask.value);
   ui.newTask.value = "";
+  ui.newTask.blur();
+  ui.taskList.focus();
+  updateTerminalMode();
+});
+ui.newTask.addEventListener("focus", updateTerminalMode);
+ui.newTask.addEventListener("blur", updateTerminalMode);
+ui.newTask.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    ui.newTask.value = "";
+    ui.newTask.blur();
+    if (state.mode === "write" && currentList()?.tasks.length) {
+      state.selectedTask = Math.min(state.selectedTask, currentList().tasks.length - 1);
+      renderTasks();
+      ui.taskList.focus();
+    }
+  }
 });
 $("#disconnect-button").addEventListener("click", () => {
   if (!window.confirm("Disconnect from GitHub on this device? Your lists stay safely in the repository.")) return;
@@ -663,11 +856,9 @@ document.addEventListener("keydown", (event) => {
   handleEditorKeys(event);
 });
 
-const params = new URLSearchParams(location.search);
-if (params.get("repo")) ui.repo.value = params.get("repo");
 if (localStorage.getItem(TOKEN_KEY) && localStorage.getItem(REPO_KEY)) {
   ui.token.value = localStorage.getItem(TOKEN_KEY);
-  ui.repo.value = params.get("repo") || localStorage.getItem(REPO_KEY);
+  ui.repo.value = localStorage.getItem(REPO_KEY);
   connect(ui.token.value, ui.repo.value, true).catch((error) => {
     ui.connectMessage.textContent = `Could not reconnect: ${error.message}`;
     ui.token.value = "";

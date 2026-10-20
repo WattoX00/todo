@@ -16,11 +16,13 @@ Lists and tasks are saved in `.daymark/todos.json` in the selected repository. A
 
 ## Share a list
 
-Use the share button in an open list to copy a link to that list. Recipients need their own token and access to the same repository; private repositories remain private.
+Use the share button in an open list to send a plain-text copy through your device's native share sheet, when available. Otherwise, Daymark copies the text to your clipboard. The shared text includes task completion and descriptions.
 
 ## Keyboard shortcuts
 
-Open a list and press `?` to see the in-app shortcut guide. Use `j` / `k` or the arrow keys to move, `gg` / `G` to jump to the first / last task, `Enter` to edit, `o` to insert and edit a task below, `a` to focus the add-task field, `x` to toggle completion, `dd` to delete, `/` to search, and `q` to return to all lists. Press `Escape` to cancel an inline edit.
+Open a list in View mode and press `e` to enter Write mode, or press `v` to return to View mode. These shortcuts also work when a list is selected from the list overview; lists open in View mode by default.
+
+In Write mode, press `j` / `k` or the arrow keys to move the selection, `gg` / `G` to jump to the first / last task, `Enter` or `i` to edit a task's title and description, `o` to insert a task below and type its title, `a` to focus the add-task field, `x` to toggle completion, `Alt+j` / `Alt+k` to reorder the selected task, `dd` to delete, `/` to search, and `q` to return to all lists. Press `Escape` to cancel a task being typed or close a dialog. Press `?` for the in-app shortcut guide.
 
 ## Development
 
