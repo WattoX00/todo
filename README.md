@@ -12,7 +12,7 @@ Create a fine-grained personal access token in GitHub and grant it access to the
 
 The app tests access to your GitHub account and repository before connecting. Choose **Remember me on this device** to save the token in this browser's local storage. The token is sent to GitHub's API and nowhere else. Anyone with access to this browser profile can use it, so avoid saving it on shared devices; disconnect to remove it from local storage, and revoke it from GitHub when no longer needed.
 
-Lists and tasks are saved in `.daymark/todos.json` in the selected repository. All changes create commits in that repository under the connected GitHub account.
+Lists and tasks are saved in `.daymark/todos.json` in the selected repository. Daymark batches nearby edits into a single commit after a short pause, and syncs ongoing edits at least every 15 seconds. Commits are created under the connected GitHub account.
 
 ## Share a list
 

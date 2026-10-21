@@ -82,7 +82,7 @@ a { color: inherit; }
 .sidebar-bottom { padding-top: 13px; border-top: 1px solid #39443d; }
 .sync-note { display: flex; align-items: center; gap: 8px; margin: 0 6px 12px; color: #99a49b; font-size: 10px; }
 .sync-indicator, .saved-dot { width: 6px; height: 6px; border-radius: 50%; background: #9bd366; }
-.sync-indicator.syncing, .saved-dot.syncing { background: #e8b365; animation: pulse 1s infinite alternate; }
+.sync-indicator.syncing, .saved-dot.syncing, .sync-indicator.pending, .saved-dot.pending { background: #e8b365; animation: pulse 1s infinite alternate; }
 .sync-indicator.error { background: #e97d6c; }
 @keyframes pulse { to { opacity: .35; } }
 .account-button { width: 100%; display: flex; align-items: center; gap: 9px; padding: 8px 6px 3px; border: 0; border-radius: 6px; background: transparent; color: #f5f8f1; text-align: left; }

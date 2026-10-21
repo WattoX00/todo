@@ -3,6 +3,8 @@ const DATA_PATH = ".daymark/todos.json";
 const TOKEN_KEY = "daymark.github.token";
 const REPO_KEY = "daymark.github.repo";
 const EMOJIS = ["✳", "☀", "🌱", "☕", "✦", "◒"];
+const SAVE_DEBOUNCE_MS = 3000;
+const SAVE_MAX_WAIT_MS = 15000;
 
 const $ = (selector) => document.querySelector(selector);
 const ui = {
@@ -40,6 +42,11 @@ const state = {
   pendingKey: "",
   toastTimer: null,
   writeQueue: Promise.resolve(),
+  saveTimer: null,
+  maxSaveTimer: null,
+  pendingSave: null,
+  changeVersion: 0,
+  dirty: false,
   editingTaskId: null,
   searchQuery: "",
   mode: "view"
@@ -116,11 +123,36 @@ async function loadData() {
   }
 }
 
-function persistData(message = "Update todo lists") {
+function persistData() {
+  state.changeVersion += 1;
+  state.dirty = true;
+  const promise = new Promise((resolve) => {
+    if (!state.pendingSave) {
+      state.pendingSave = { waiters: [] };
+      state.maxSaveTimer = setTimeout(flushPendingSave, SAVE_MAX_WAIT_MS);
+    }
+    state.pendingSave.waiters.push(resolve);
+    clearTimeout(state.saveTimer);
+    state.saveTimer = setTimeout(flushPendingSave, SAVE_DEBOUNCE_MS);
+  });
+  setSyncStatus("Changes queued for GitHub", "pending");
+  return promise;
+}
+
+function flushPendingSave() {
+  const batch = state.pendingSave;
+  if (!batch) return;
+  clearTimeout(state.saveTimer);
+  clearTimeout(state.maxSaveTimer);
+  state.saveTimer = null;
+  state.maxSaveTimer = null;
+  state.pendingSave = null;
+
   const save = state.writeQueue.then(async () => {
     setSyncStatus("Saving…", "syncing");
+    const version = state.changeVersion;
     const body = {
-      message: `${message} with Daymark`,
+      message: "Batch update todo lists with Daymark",
       content: encodeContent(state.data),
       ...(state.sha ? { sha: state.sha } : {})
     };
@@ -129,21 +161,25 @@ function persistData(message = "Update todo lists") {
       body: JSON.stringify(body)
     });
     state.sha = file.content.sha;
-    setSyncStatus("Synced with GitHub", "");
+    state.dirty = state.changeVersion !== version;
     render();
     return true;
   });
   state.writeQueue = save.catch((error) => {
-    setSyncStatus("Sync failed", "error");
     showToast(`Could not save to GitHub: ${error.message}`, true);
     return false;
+  });
+  state.writeQueue.then((saved) => {
+    if (state.pendingSave || state.dirty) setSyncStatus("Changes queued for GitHub", "pending");
+    else setSyncStatus(saved ? "Synced with GitHub" : "Sync failed", saved ? "" : "error");
+    batch.waiters.forEach((resolve) => resolve(saved));
   });
   return state.writeQueue;
 }
 
 function setSyncStatus(label, status) {
   $("#sync-label").textContent = label;
-  $("#saved-label").textContent = status === "syncing" ? "Saving changes…" : status === "error" ? "Could not sync" : "All changes saved";
+  $("#saved-label").textContent = status === "syncing" ? "Saving changes…" : status === "pending" ? "Changes queued" : status === "error" ? "Could not sync" : "All changes saved";
   $("#sync-indicator").className = `sync-indicator ${status}`;
   $(".saved-dot").className = `saved-dot ${status}`;
 }
@@ -403,7 +439,7 @@ function saveTaskEdit(id, value, returnFocus = false) {
   if (task && value.trim()) {
     task.text = value.trim();
     delete task.draft;
-    persistData("Edit task");
+    persistData();
   } else if (task?.draft) {
     currentList().tasks = currentList().tasks.filter((item) => item.id !== id);
   }
@@ -420,7 +456,7 @@ function addTask(text, index = null) {
   if (index === null) list.tasks.push(task);
   else list.tasks.splice(index, 0, task);
   state.selectedTask = list.tasks.indexOf(task);
-  persistData("Add task");
+  persistData();
   renderTasks();
 }
 
@@ -450,7 +486,7 @@ function openTaskEditor(task) {
     task.text = nextTitle;
     task.description = description.value.trim();
     delete task.draft;
-    if (!await persistData("Edit task")) {
+    if (!await persistData()) {
       Object.assign(task, previous);
       renderTasks();
       return;
@@ -478,7 +514,7 @@ function toggleTask(taskId = currentList()?.tasks[state.selectedTask]?.id) {
   if (!task) return;
   task.completed = !task.completed;
   state.selectedTask = currentList().tasks.indexOf(task);
-  persistData(task.completed ? "Complete task" : "Reopen task");
+  persistData();
   render();
 }
 
@@ -488,7 +524,7 @@ function moveTask(index, direction) {
   if (!list || destination < 0 || destination >= list.tasks.length) return;
   [list.tasks[index], list.tasks[destination]] = [list.tasks[destination], list.tasks[index]];
   state.selectedTask = destination;
-  persistData("Reorder tasks");
+  persistData();
   renderTasks();
 }
 
@@ -497,7 +533,7 @@ function deleteSelectedTask() {
   if (!list || !list.tasks[state.selectedTask]) return;
   const [removed] = list.tasks.splice(state.selectedTask, 1);
   state.selectedTask = Math.max(0, Math.min(state.selectedTask, list.tasks.length - 1));
-  persistData("Delete task");
+  persistData();
   renderTasks();
   showToast(`Removed “${removed.text}”`);
 }
@@ -556,7 +592,7 @@ function createList() {
       if (state.data.lists.some((list) => list.title.toLowerCase() === title.toLowerCase())) throw new Error("You already have a list with that name.");
       const list = { id: crypto.randomUUID(), title, emoji: state.data.lists.length % EMOJIS.length, tasks: [] };
       state.data.lists.push(list);
-      const saved = await persistData("Create list");
+      const saved = await persistData();
       if (!saved) {
         state.data.lists = state.data.lists.filter((item) => item.id !== list.id);
         render();
@@ -583,7 +619,7 @@ function renameList() {
         const index = state.data.lists.indexOf(list);
         state.data.lists = state.data.lists.filter((item) => item.id !== list.id);
         state.activeListId = null;
-        const saved = await persistData("Delete list");
+        const saved = await persistData();
         if (!saved) {
           state.data.lists.splice(index, 0, list);
           state.activeListId = list.id;
@@ -600,7 +636,7 @@ function renameList() {
       if (state.data.lists.some((item) => item.id !== list.id && item.title.toLowerCase() === title.toLowerCase())) throw new Error("You already have a list with that name.");
       const previousTitle = list.title;
       list.title = title;
-      const saved = await persistData("Rename list");
+      const saved = await persistData();
       if (!saved) {
         list.title = previousTitle;
         render();
@@ -837,8 +873,17 @@ ui.newTask.addEventListener("keydown", (event) => {
     }
   }
 });
-$("#disconnect-button").addEventListener("click", () => {
+$("#disconnect-button").addEventListener("click", async () => {
   if (!window.confirm("Disconnect from GitHub on this device? Your lists stay safely in the repository.")) return;
+  const button = $("#disconnect-button");
+  button.disabled = true;
+  while (state.dirty) {
+    if (!state.pendingSave) persistData();
+    if (!await flushPendingSave()) {
+      button.disabled = false;
+      return;
+    }
+  }
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REPO_KEY);
   location.href = location.pathname;
@@ -854,6 +899,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   handleEditorKeys(event);
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!state.dirty) return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 if (localStorage.getItem(TOKEN_KEY) && localStorage.getItem(REPO_KEY)) {
